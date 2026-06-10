@@ -32,6 +32,31 @@ ANTHROPIC_API_KEY=sk-...
 
 ELEVENLABS_API_KEY=4...
 
+### Switching TTS provider (ElevenLabs or 60dB)
+
+TTS is provider-switchable via `.env`. Default is ElevenLabs (unchanged). To use 60dB instead, set:
+
+```
+TTS_PROVIDER=60db          # 'elevenlabs' (default) or '60db'
+SIXTYDB_API_KEY=sk_live_...
+SIXTYDB_VOICE_ID=<uuid>     # from GET https://api.60db.ai/myvoices; omit for system default
+SIXTYDB_OUTPUT_FORMAT=mp3   # mp3 | wav | ogg | flac (optional, default mp3)
+```
+
+60dB uses the simple REST endpoint (`/tts-synthesize`), which returns base64-encoded audio; it's decoded and fed into the same file → queue → pygame playback path as ElevenLabs, so behavior is identical aside from the voice.
+
+### Switching STT provider (Faster-Whisper or 60dB)
+
+Speech-to-text is also provider-switchable. Default is local Faster-Whisper (unchanged, needs CUDA). To offload transcription to the 60dB cloud instead (no GPU needed), set:
+
+```
+STT_PROVIDER=60db          # 'whisper' (default) or '60db'
+SIXTYDB_API_KEY=sk_live_... # same key as TTS
+SIXTYDB_STT_LANGUAGE=auto   # ISO 639-1 code (e.g. en, hi) or 'auto' (optional, default auto)
+```
+
+The 60dB path uploads the same temporary WAV via `POST /stt` (multipart) and reads the `text` field from the response. TTS and STT providers are independent — you can mix, e.g. Whisper STT with 60dB TTS, or 60dB for both.
+
 
 
 

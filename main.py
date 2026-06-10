@@ -5,6 +5,7 @@ import asyncio
 import keyboard
 import time
 import tempfile
+import httpx
 import anthropic
 import datetime
 import sounddevice as sd
@@ -25,9 +26,15 @@ import pygame
 load_dotenv()
 anthropic_key = os.getenv('ANTHROPIC_KEY')
 
+# Speech-to-text provider: 'whisper' (default, local Faster-Whisper) or '60db'.
+STT_PROVIDER = os.getenv('STT_PROVIDER', 'whisper').strip().lower()
+SIXTYDB_API_KEY = os.getenv('SIXTYDB_API_KEY')
+SIXTYDB_STT_LANGUAGE = os.getenv('SIXTYDB_STT_LANGUAGE', 'auto')  # ISO 639-1 or 'auto'
+
 # Initialize colorama and Anthropic client
 init(autoreset=True)
 client = anthropic.Anthropic(api_key=anthropic_key)
+print(Fore.YELLOW + f"STT provider: {STT_PROVIDER}" + Style.RESET_ALL)
 
 # Initialize Pygame for audio playback
 pygame.mixer.init()
@@ -106,6 +113,31 @@ def on_space_press(event):
             current_state = States.PROCESSING_USER_INPUT
 
 
+def _transcribe_whisper(temp_file_path):
+    # Local Faster-Whisper transcription (unchanged).
+    segments, _ = WhisperModel(
+        model_size, device="cuda", compute_type=compute_type).transcribe(temp_file_path)
+    return " ".join(segment.text for segment in segments)
+
+
+def _transcribe_60db(temp_file_path):
+    # 60dB cloud transcription via POST /stt (multipart file upload).
+    if SIXTYDB_API_KEY is None:
+        raise RuntimeError("SIXTYDB_API_KEY is not set.")
+
+    url = 'https://api.60db.ai/stt'
+    headers = {"Authorization": f"Bearer {SIXTYDB_API_KEY}"}
+    data = {"language": SIXTYDB_STT_LANGUAGE}
+    with open(temp_file_path, 'rb') as audio_file:
+        files = {"file": ("audio.wav", audio_file, "audio/wav")}
+        response = httpx.post(url, headers=headers, data=data,
+                              files=files, timeout=60.0)
+
+    if response.status_code != 200:
+        raise RuntimeError(f"60dB STT {response.status_code} - {response.text}")
+    return response.json().get("text", "")
+
+
 def transcribe_audio_to_text(audio_data, sample_rate):
     start_time = time.time()  # Record the start time
     temp_dir = './input/'
@@ -113,9 +145,10 @@ def transcribe_audio_to_text(audio_data, sample_rate):
     temp_file_path = tempfile.mktemp(suffix='.wav', dir=temp_dir)
     try:
         write(temp_file_path, sample_rate, audio_data)
-        segments, _ = WhisperModel(
-            model_size, device="cuda", compute_type=compute_type).transcribe(temp_file_path)
-        transcript = " ".join(segment.text for segment in segments)
+        if STT_PROVIDER == '60db':
+            transcript = _transcribe_60db(temp_file_path)
+        else:
+            transcript = _transcribe_whisper(temp_file_path)
         print(Fore.GREEN + "User:", transcript)
         end_time = time.time()  # Record the end time
         duration = end_time - start_time  # Calculate the duration
